@@ -1,278 +1,212 @@
 # Claude HUD GLM
 
-A Claude Code plugin that shows what's happening — context usage, active tools, running agents, todo progress, and **GLM API balance tracking**. Always visible below your input.
+**[English](#english) | [中文](#中文)**
 
-This is a fork of [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) with added support for [Zhipu AI GLM API](https://open.bigmodel.cn/) usage tracking.
+---
 
-[![npm version](https://badge.fury.io/js/claude-hud-glm.svg)](https://www.npmjs.com/package/claude-hud-glm)
+<a id="中文"></a>
+
+## 中文
+
+> Fork 自 [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
+
+基于原版 claude-hud-glm 插件，增加了 **GLM Coding Plan 配额用量** 的实时显示。
+
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node version](https://img.shields.io/node/v/claude-hud-glm.svg)](https://nodejs.org)
+[![Fork](https://img.shields.io/badge/fork-Siiichenggg/claude--hud--glm-blue.svg)](https://github.com/Siiichenggg/claude-hud-glm)
 
-## Features
+### 效果预览
 
-| What You See | Why It Matters |
-|--------------|----------------|
-| **Project path** | Know which project you're in (configurable 1-3 directory levels) |
-| **Context health** | Know exactly how full your context window is before it's too late |
-| **Tool activity** | Watch Claude read, edit, and search files as it happens |
-| **Agent tracking** | See which subagents are running and what they're doing |
-| **Todo progress** | Track task completion in real-time |
-| **GLM Balance** | 🆕 Track your GLM API token balance and usage percentage |
+![Coding Plan 配额预览](coding-plan-preview.png)
 
-## GLM API Support
+状态栏会实时显示：
+- **5h: 17% (3h 55m)** — 5小时滚动窗口 token 用量及重置倒计时
+- **7d: 63%** — 每周 token 用量百分比
 
-This version adds support for tracking usage when using the GLM API (Zhipu AI/BigModel):
+### 与原版的区别
 
-- **Automatic Detection**: Automatically detects when you're using GLM API via `ANTHROPIC_BASE_URL` containing `bigmodel.cn`
-- **Balance Tracking**: Shows your token balance usage as a percentage
-- **Expiration Display**: Shows when your token balance expires
-- **Fallback Support**: Still works with original Anthropic API if you're not using GLM
+| 特性 | 原版 | 本 Fork |
+|------|------|---------|
+| 用量数据来源 | Token 余额 API (`/api/biz/tokenAccounts/list/my`) | Coding Plan 配额 API (`/api/monitor/usage/quota/limit`) |
+| 显示内容 | Token 包余额百分比 | 5小时窗口 + 每周额度用量 |
+| 支持平台 | bigmodel.cn | bigmodel.cn + z.ai |
+| 重置倒计时 | Token 过期时间 | 5小时窗口自动倒计时 |
 
-### Display Example
+### 安装
 
-```
-[glm-4.7 | GLM] █████░░░░ 45% | my-project git:(main) | GLM: 23% (expires 15d) | ⏱️ 5m
-```
+#### 方式一：直接替换已安装插件
 
-## Install
+如果你已经通过原版插件市场安装了 `claude-hud-glm`，可以直接替换编译后的文件：
 
-Inside a Claude Code instance, run the following commands:
-
-**Step 1: Install the plugin**
-
-<details>
-<summary><strong>⚠️ Linux users: Click here first</strong></summary>
-
-On Linux, `/tmp` is often a separate filesystem (tmpfs), which causes plugin installation to fail with:
-```
-EXDEV: cross-device link not permitted
-```
-
-**Fix**: Set TMPDIR before installing:
 ```bash
-mkdir -p ~/.cache/tmp && TMPDIR=~/.cache/tmp claude
+# 替换缓存版本（实际运行的文件）
+cp dist/glm-usage-api.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/glm-usage-api.js
+cp dist/render/lines/usage.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/render/lines/usage.js
 ```
 
-Then run the install command below in that session. This is a [Claude Code platform limitation](https://github.com/anthropics/claude-code/issues/14799).
+替换后重启 Claude Code 即可生效。
 
-</details>
+#### 方式二：从本仓库安装
 
-```
-/plugin marketplace add Siiichenggg/claude-hud-glm
-/plugin install claude-hud-glm
-```
-
-If you're installing from a local checkout instead of GitHub, add the local marketplace path first:
-```
-/plugin marketplace add /path/to/claude-hud-glm
-/plugin install claude-hud-glm
+```bash
+git clone https://github.com/jinxiaocheng/claude-hud-glm.git
+cd claude-hud-glm
+npm install && npm run build
 ```
 
-**Step 2: Configure the statusline**
-```
-/claude-hud-glm:setup
-```
+然后在 Claude Code 中：
 
-Done! The HUD appears immediately — no restart needed.
-
----
-
-## Alternative: Install from a Local Checkout
-
-If you cloned the repo locally, add it as a marketplace path:
 ```
 /plugin marketplace add /path/to/claude-hud-glm
 /plugin install claude-hud-glm
 /claude-hud-glm:setup
 ```
 
----
+### 配置要求
 
-## What Each Line Shows
-
-### Session Info
-```
-[glm-4.7 | GLM] █████░░░░ 45% | my-project git:(main) | 2 CLAUDE.md | GLM: 23% (expires 15d) | ⏱️ 5m
-```
-- **Model** — Current model in use (shown first)
-- **Plan name** — GLM when using GLM API, or Pro/Max/Team for Anthropic
-- **Context bar** — Visual meter with color coding (green → yellow → red as it fills)
-- **Project path** — Configurable 1-3 directory levels (default: 1)
-- **Git branch** — Current branch name (configurable on/off)
-- **Config counts** — CLAUDE.md files, rules, MCPs, and hooks loaded
-- **Usage/Balance** — GLM token usage % (or Anthropic 5h/7d for Pro/Max/Team)
-- **Duration** — How long the session has been running
-
-### Tool Activity
-```
-✓ TaskOutput ×2 | ✓ mcp_context7 ×1 | ✓ Glob ×1 | ✓ Skill ×1
-```
-- **Running tools** show a spinner with the target file
-- **Completed tools** aggregate by type with counts
-
-### Agent Status
-```
-✓ Explore: Explore home directory structure (5s)
-✓ open-source-librarian: Research React hooks patterns (2s)
-```
-- **Agent type** and what it's working on
-- **Elapsed time** for each agent
-
-### Todo Progress
-```
-✓ All todos complete (5/5)
-```
-- **Current task** or completion status
-- **Progress counter** (completed/total)
-
----
-
-## Configuration
-
-Customize your HUD anytime:
-
-```
-/claude-hud-glm:configure
-```
-
-The guided flow walks you through customization — no manual editing needed.
-
-### Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `lineLayout` | string | `expanded` | Layout style: `compact` or `expanded` |
-| `pathLevels` | 1-3 | 1 | Directory levels to show in project path |
-| `gitStatus.enabled` | boolean | true | Show git branch in HUD |
-| `gitStatus.showDirty` | boolean | true | Show `*` for uncommitted changes |
-| `gitStatus.showAheadBehind` | boolean | false | Show `↑N ↓N` for ahead/behind remote |
-| `gitStatus.showFileStats` | boolean | false | Show file change counts `!M +A ✘D ?U` |
-| `display.showModel` | boolean | true | Show model name `[glm-4.7]` |
-| `display.showContextBar` | boolean | true | Show visual context bar `████░░░░░░` |
-| `display.showConfigCounts` | boolean | true | Show CLAUDE.md, rules, MCPs, hooks counts |
-| `display.showDuration` | boolean | true | Show session duration `⏱️ 5m` |
-| `display.showUsage` | boolean | true | Show GLM balance or Anthropic usage limits |
-| `display.usageThreshold` | number | 0 | Only show usage when above this % |
-| `display.showTokenBreakdown` | boolean | true | Show token details at high context (85%+) |
-| `display.showTools` | boolean | true | Show tools activity line |
-| `display.showAgents` | boolean | true | Show agents activity line |
-| `display.showTodos` | boolean | true | Show todos progress line |
-
-### Example Configuration
+在 `~/.claude/settings.json` 中需要配置以下环境变量：
 
 ```json
 {
-  "lineLayout": "expanded",
-  "pathLevels": 2,
-  "gitStatus": {
-    "enabled": true,
-    "showDirty": true,
-    "showAheadBehind": true,
-    "showFileStats": true
-  },
-  "display": {
-    "showModel": true,
-    "showContextBar": true,
-    "showConfigCounts": true,
-    "showDuration": true,
-    "showUsage": true,
-    "usageThreshold": 10,
-    "showTokenBreakdown": true,
-    "showTools": true,
-    "showAgents": true,
-    "showTodos": true
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "你的API密钥",
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"
   }
 }
 ```
 
----
+支持的 BASE_URL：
+- `https://api.z.ai/api/anthropic`
+- `https://open.bigmodel.cn/api/anthropic`
 
-## How GLM Usage Tracking Works
+### 工作原理
 
-1. **Reads Configuration**: Automatically reads your `~/.claude/settings.json` to detect GLM API configuration
-2. **Queries Balance**: Calls GLM's balance query API (`GET /api/biz/tokenAccounts/list/my`)
-3. **Aggregates Bundles**: Sums up all token bundles (通用, GLM-4.6, GLM-4.5, etc.)
-4. **Calculates Percentage**: Shows used balance as a percentage of total balance (if `totalAmount` is available)
-5. **Tracks Expiry**: Finds the earliest expiration date across all bundles
-6. **Caches Results**: Caches for 60 seconds to avoid excessive API calls
-7. **Falls Back**: Automatically falls back to Anthropic API if GLM is not detected
+调用 GLM Coding Plan 的配额查询接口：
 
-### GLM API Response Format
-
-The plugin calls GLM's balance API and expects:
-```json
-{
-  "total": 6,
-  "rows": [
-    {
-      "id": 19350025,
-      "tokenNo": "bundle_689",
-      "tokenBalance": 20,
-      "totalAmount": 100,
-      "expirationTime": "2026-03-23T12:04:57Z",
-      "resourcePackageName": "【新用户专享】20次图片/视频生成资源包"
-    }
-  ]
-}
+```
+GET /api/monitor/usage/quota/limit
 ```
 
+响应中的 `limits` 数组包含多个配额项，通过 `unit` 字段区分：
+
+| unit | 含义 | 显示为 |
+|------|------|--------|
+| 3 | 5小时滚动窗口 token 用量 | `5h: XX%` |
+| 6 | 每周 token 用量 | `7d: XX%` |
+| 5 | MCP 工具月度用量 | （暂未显示） |
+
+每个配额项还包含 `nextResetTime` 时间戳，用于计算重置倒计时。
+
+### 技术细节
+
+- **缓存机制**: 文件缓存，成功结果 60 秒过期，失败结果 15 秒过期
+- **认证方式**: Authorization header 直接使用 API token（不加 Bearer 前缀）
+- **颜色编码**: 百分比会根据用量自动变色（低 → 绿，中 → 黄，高 → 红）
+
+### 致谢
+
+- 原版插件: [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
+- 上游项目: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
+- 配额 API 参考: [zai-org/zai-coding-plugins](https://github.com/zai-org/zai-coding-plugins)
+
 ---
 
-## Local Installation (for development)
+<a id="english"></a>
 
-If you want to install from a local copy:
+## English
 
-**Step 1: Clone and build**
+A Claude Code plugin that shows what's happening — context usage, active tools, running agents, todo progress, and **GLM Coding Plan quota tracking**. Always visible below your input.
+
+This is a fork of [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm) (which itself forks [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)) with support for **GLM Coding Plan** usage tracking.
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Fork](https://img.shields.io/badge/fork-Siiichenggg/claude--hud--glm-blue.svg)](https://github.com/Siiichenggg/claude-hud-glm)
+
+### What's Different
+
+| Feature | Upstream | This Fork |
+|---------|----------|-----------|
+| Data source | Token balance API (`/api/biz/tokenAccounts/list/my`) | Coding Plan quota API (`/api/monitor/usage/quota/limit`) |
+| Display | Token package balance % | 5-hour window + weekly quota usage |
+| Platforms | bigmodel.cn | bigmodel.cn + z.ai |
+| Reset countdown | Token expiry time | 5-hour window auto countdown |
+
+### Install
+
+**Option 1: Replace existing plugin files**
+
+If you already installed `claude-hud-glm` from the marketplace:
+
 ```bash
-git clone https://github.com/Siiichenggg/claude-hud-glm
-cd claude-hud-glm
-npm ci && npm run build
+cp dist/glm-usage-api.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/glm-usage-api.js
+cp dist/render/lines/usage.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/render/lines/usage.js
 ```
 
-**Step 2: Add local marketplace and install**
+Restart Claude Code after replacing.
+
+**Option 2: Install from this repo**
+
+```bash
+git clone https://github.com/jinxiaocheng/claude-hud-glm.git
+cd claude-hud-glm
+npm install && npm run build
+```
+
+Then in Claude Code:
+
 ```
 /plugin marketplace add /path/to/claude-hud-glm
 /plugin install claude-hud-glm
-```
-
-**Step 3: Configure**
-```
 /claude-hud-glm:setup
 ```
 
----
+### Configuration
 
-## Requirements
+Add to `~/.claude/settings.json`:
 
-- Claude Code v1.0.80+
-- Node.js 18+ or Bun
-- For GLM usage tracking: Valid GLM API credentials in your Claude settings
-
----
-
-## Development
-
-```bash
-git clone https://github.com/Siiichenggg/claude-hud-glm
-cd claude-hud-glm
-npm ci && npm run build
-npm test
+```json
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "your-api-key",
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic"
+  }
+}
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Supported BASE_URL:
+- `https://api.z.ai/api/anthropic`
+- `https://open.bigmodel.cn/api/anthropic`
 
----
+### How It Works
+
+Calls the GLM Coding Plan quota API endpoint:
+
+```
+GET /api/monitor/usage/quota/limit
+```
+
+The `limits` array contains quota items distinguished by the `unit` field:
+
+| unit | Meaning | Display |
+|------|---------|---------|
+| 3 | 5-hour rolling token window | `5h: XX%` |
+| 6 | Weekly token quota | `7d: XX%` |
+| 5 | Monthly MCP tool quota | (not shown yet) |
+
+Each item includes a `nextResetTime` timestamp for countdown display.
+
+### Technical Details
+
+- **Caching**: File-based, 60s TTL for success, 15s for failures
+- **Auth**: Raw token in Authorization header (no Bearer prefix)
+- **Color coding**: Percentage auto-colors (green → yellow → red)
+
+### Acknowledgments
+
+- Original plugin: [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
+- Upstream project: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
+- Quota API reference: [zai-org/zai-coding-plugins](https://github.com/zai-org/zai-coding-plugins)
 
 ## License
 
 MIT License — see [LICENSE](LICENSE)
-
-This is a fork of [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud), which is also licensed under the MIT License.
-
----
-
-## Acknowledgments
-
-- Original project: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
-- Original author: Jarrod Watts
-- GLM API integration added for Chinese users and Zhipu AI customers
