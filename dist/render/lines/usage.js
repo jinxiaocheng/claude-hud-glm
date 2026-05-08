@@ -17,20 +17,32 @@ export function renderUsageLine(ctx) {
             : formatResetTime(ctx.usageData.sevenDayResetAt);
         return red(`⚠ Limit reached${resetTime ? ` (resets ${resetTime})` : ''}`);
     }
-    // Special handling for GLM (which only uses fiveHour for balance percentage)
+    // GLM Coding Plan: 显示5小时和每周token用量
     if (ctx.usageData.planName === 'GLM') {
         const fiveHour = ctx.usageData.fiveHour;
-        const expireTime = formatResetTime(ctx.usageData.fiveHourResetAt);
-        // GLM always shows expiry if available, regardless of threshold
-        if (fiveHour !== null) {
-            const usageDisplay = formatUsagePercent(fiveHour);
-            return expireTime
-                ? `GLM: ${usageDisplay} (expires ${expireTime})`
-                : `GLM: ${usageDisplay}`;
+        const sevenDay = ctx.usageData.sevenDay;
+        const fiveHourReset = formatResetTime(ctx.usageData.fiveHourResetAt);
+        const sevenDayReset = formatResetTime(ctx.usageData.sevenDayResetAt);
+        // 同时显示5h和每周用量
+        if (fiveHour !== null && sevenDay !== null) {
+            const fiveHourDisplay = formatUsagePercent(fiveHour);
+            const sevenDayDisplay = formatUsagePercent(sevenDay);
+            const fivePart = fiveHourReset
+                ? `5h: ${fiveHourDisplay} (${fiveHourReset})`
+                : `5h: ${fiveHourDisplay}`;
+            return `${fivePart} | 7d: ${sevenDayDisplay}`;
         }
-        else if (expireTime) {
-            // GLM but no percentage available - show expiry only
-            return `GLM: expires ${expireTime}`;
+        if (fiveHour !== null) {
+            const fiveHourDisplay = formatUsagePercent(fiveHour);
+            return fiveHourReset
+                ? `5h: ${fiveHourDisplay} (${fiveHourReset})`
+                : `5h: ${fiveHourDisplay}`;
+        }
+        if (sevenDay !== null) {
+            const sevenDayDisplay = formatUsagePercent(sevenDay);
+            return sevenDayReset
+                ? `7d: ${sevenDayDisplay} (${sevenDayReset})`
+                : `7d: ${sevenDayDisplay}`;
         }
         return null;
     }

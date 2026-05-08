@@ -7,20 +7,24 @@ import { createDebug } from './debug.js';
 
 const debug = createDebug('glm-usage');
 
-interface GlmUsageApiResponse {
-  success?: boolean;
+// Coding Plan 配额接口响应
+interface GlmQuotaApiResponse {
   code?: number;
   msg?: string;
-  rows?: Array<{
-    id?: number;
-    tokenNo: string;
-    tokenBalance: number;
-    totalAmount?: number;
-    expirationTime?: string;
-    validDate?: string;
-    purchaseTime?: string;
-    resourcePackageName?: string;
-  }>;
+  data?: {
+    limits?: Array<{
+      type: string;
+      unit?: number;       // 3=5小时, 6=每周, 5=每月
+      number?: number;     // 数量
+      percentage: number;  // 使用百分比
+      nextResetTime?: number; // 重置时间戳(ms)
+      usage?: number;
+      currentValue?: number;
+      remaining?: number;
+      usageDetails?: Array<{ modelCode: string; usage: number }>;
+    }>;
+    level?: string;
+  };
 }
 
 interface ClaudeSettings {
@@ -28,27 +32,6 @@ interface ClaudeSettings {
     ANTHROPIC_AUTH_TOKEN?: string;
     ANTHROPIC_BASE_URL?: string;
   };
-}
-
-function inferTotalFromPackageName(name?: string): number | null {
-  if (!name) return null;
-
-  // Skip non-token packages like "20次图片/视频生成资源包"
-  if (name.includes('次') && !name.includes('万') && !name.includes('亿')) {
-    return null;
-  }
-
-  // Match numbers with optional unit (万, 亿)
-  const match = name.match(/(\d+(?:\.\d+)?)(万|亿)?/);
-  if (!match) return null;
-
-  const value = Number(match[1]);
-  if (!Number.isFinite(value)) return null;
-
-  const unit = match[2];
-  if (unit === '万') return Math.round(value * 10_000);
-  if (unit === '亿') return Math.round(value * 100_000_000);
-  return Math.round(value);
 }
 
 // File-based cache (HUD runs as new process each render, so in-memory cache won't persist)
@@ -110,20 +93,21 @@ function writeCache(homeDir: string, data: UsageData, timestamp: number): void {
 // Dependency injection for testing
 export type GlmUsageApiDeps = {
   homeDir: () => string;
-  fetchApi: (apiKey: string, baseUrl: string) => Promise<GlmUsageApiResponse | null>;
+  fetchApi: (apiKey: string, baseUrl: string) => Promise<GlmQuotaApiResponse['data'] | null>;
   now: () => number;
   readSettings: () => ClaudeSettings | null;
 };
 
 const defaultDeps: GlmUsageApiDeps = {
   homeDir: () => os.homedir(),
-  fetchApi: fetchGlmUsageApi,
+  fetchApi: fetchGlmQuotaApi,
   now: () => Date.now(),
   readSettings: readClaudeSettings,
 };
 
 /**
- * Get GLM usage data from GLM API (open.bigmodel.cn).
+ * Get GLM Coding Plan usage data from GLM API (open.bigmodel.cn or z.ai).
+ * 调用 Coding Plan 配额接口，获取5小时和每周token用量百分比。
  * Returns null if not configured for GLM or API key is missing.
  * Returns { apiUnavailable: true, ... } if API call fails.
  *
@@ -152,28 +136,21 @@ export async function getGlmUsage(overrides: Partial<GlmUsageApiDeps> = {}): Pro
     const apiKey = settings.env.ANTHROPIC_AUTH_TOKEN;
     const baseUrl = settings.env.ANTHROPIC_BASE_URL;
 
-    // Check if configured for GLM (open.bigmodel.cn)
+    // 检查是否配置了 GLM (open.bigmodel.cn 或 z.ai)
     if (!apiKey || !baseUrl) {
       debug('No API key or base URL configured');
       return null;
     }
 
-    if (!baseUrl.includes('bigmodel.cn')) {
-      debug('Not configured for GLM API (bigmodel.cn not found in base URL)');
+    if (!baseUrl.includes('bigmodel.cn') && !baseUrl.includes('z.ai')) {
+      debug('Not configured for GLM API (bigmodel.cn or z.ai not found in base URL)');
       return null;
     }
 
-    // Extract token ID from API key (format: id.secret)
-    const tokenId = apiKey.split('.')[0];
-    if (!tokenId) {
-      debug('Invalid API key format');
-      return null;
-    }
-
-    // Fetch usage from GLM API
+    // 调用 Coding Plan 配额查询接口
     const apiResponse = await deps.fetchApi(apiKey, baseUrl);
     if (!apiResponse) {
-      // API call failed, cache the failure to prevent retry storms
+      // API调用失败，缓存失败结果防止重试风暴
       const failureResult: UsageData = {
         planName: 'GLM',
         fiveHour: null,
@@ -186,53 +163,50 @@ export async function getGlmUsage(overrides: Partial<GlmUsageApiDeps> = {}): Pro
       return failureResult;
     }
 
-    // Parse GLM API response
-    // GLM returns rows of token bundles, we need to aggregate them
-    const rows = apiResponse.rows || [];
+    // 解析 Coding Plan 配额响应
+    // unit=3 → 5小时token滚动窗口
+    // unit=6 → 每周token额度
+    // unit=5 → MCP工具月度额度 (TIME_LIMIT)
+    const limits = apiResponse.limits || [];
+    let fiveHourPercent: number | null = null;
+    let sevenDayPercent: number | null = null;
+    let fiveHourResetAt: Date | null = null;
+    let sevenDayResetAt: Date | null = null;
 
-    // Aggregate all token balances (only rows with known totals are included)
-    let totalGranted = 0;  // Total tokens granted
-    let remainingBalance = 0;  // Remaining balance
-    let earliestExpiry: Date | null = null;
-
-    for (const row of rows) {
-      const tokenBalance = row.tokenBalance || 0;
-
-      // totalAmount may not be in the response; try to infer from package name
-      const inferredTotal = row.totalAmount || inferTotalFromPackageName(row.resourcePackageName);
-      if (inferredTotal) {
-        totalGranted += inferredTotal;
-        remainingBalance += tokenBalance;
-      }
-
-      // Track earliest expiration date (support both field names)
-      const expiryStr = row.expirationTime || row.validDate;
-      if (expiryStr) {
-        const expiryDate = new Date(expiryStr);
-        if (!isNaN(expiryDate.getTime())) {
-          if (!earliestExpiry || expiryDate < earliestExpiry) {
-            earliestExpiry = expiryDate;
+    for (const item of limits) {
+      if (item.type === 'TOKENS_LIMIT') {
+        if (item.percentage != null) {
+          if (item.unit === 3) {
+            // unit=3 → 5小时滚动窗口
+            fiveHourPercent = item.percentage;
+            if (item.nextResetTime) {
+              fiveHourResetAt = new Date(item.nextResetTime);
+            }
+          } else if (item.unit === 6) {
+            // unit=6 → 每周额度
+            sevenDayPercent = item.percentage;
+            if (item.nextResetTime) {
+              sevenDayResetAt = new Date(item.nextResetTime);
+            }
           }
         }
       }
     }
 
-    // Calculate usage percentage
-    // If we don't have totalGranted, we'll show remaining tokens instead
-    let usagePercentage: number | null = null;
-    if (totalGranted > 0) {
-      const used = totalGranted - remainingBalance;
-      usagePercentage = Math.round((used / totalGranted) * 100);
-      // Clamp to 0-100
-      usagePercentage = Math.max(0, Math.min(100, usagePercentage));
+    // 钳位到0-100范围
+    if (fiveHourPercent !== null) {
+      fiveHourPercent = Math.max(0, Math.min(100, Math.round(fiveHourPercent)));
+    }
+    if (sevenDayPercent !== null) {
+      sevenDayPercent = Math.max(0, Math.min(100, Math.round(sevenDayPercent)));
     }
 
     const result: UsageData = {
       planName: 'GLM',
-      fiveHour: usagePercentage,
-      sevenDay: null, // GLM doesn't have separate 5h/7d windows
-      fiveHourResetAt: earliestExpiry,
-      sevenDayResetAt: null,
+      fiveHour: fiveHourPercent,
+      sevenDay: sevenDayPercent,
+      fiveHourResetAt,
+      sevenDayResetAt,
     };
 
     // Write to file cache
@@ -265,57 +239,71 @@ function readClaudeSettings(): ClaudeSettings | null {
 }
 
 /**
- * Fetch usage data from GLM API.
- * GLM API endpoint: https://bigmodel.cn/api/biz/tokenAccounts/list/my
+ * 调用 GLM Coding Plan 配额查询接口。
+ * 端点: https://api.z.ai/api/monitor/usage/quota/limit
+ * 或:   https://open.bigmodel.cn/api/monitor/usage/quota/limit
+ * 注意: Authorization header 直接使用 token，不加 "Bearer " 前缀。
  */
-function fetchGlmUsageApi(apiKey: string, baseUrl: string): Promise<GlmUsageApiResponse | null> {
+function fetchGlmQuotaApi(apiKey: string, baseUrl: string): Promise<GlmQuotaApiResponse['data'] | null> {
   return new Promise((resolve) => {
-    // Use the correct GLM balance query API endpoint
-    const apiUrl = 'bigmodel.cn';
-    const apiPath = '/api/biz/tokenAccounts/list/my';
+    let quotaHost: string;
+    const parsedBaseUrl = new URL(baseUrl);
+
+    if (baseUrl.includes('api.z.ai')) {
+      quotaHost = 'api.z.ai';
+    } else if (baseUrl.includes('open.bigmodel.cn') || baseUrl.includes('dev.bigmodel.cn')) {
+      quotaHost = parsedBaseUrl.hostname;
+    } else {
+      debug('Unrecognized base URL for quota API:', baseUrl);
+      resolve(null);
+      return;
+    }
 
     const options = {
-      hostname: apiUrl,
-      path: apiPath,
+      hostname: quotaHost,
+      port: 443,
+      path: '/api/monitor/usage/quota/limit',
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': apiKey,
+        'Accept-Language': 'en-US,en',
+        'Content-Type': 'application/json',
         'User-Agent': 'claude-hud-glm/1.0',
       },
       timeout: 5000,
     };
 
-    const req = https.request(options, (res) => {
+    const req = https.request(options, (res: any) => {
       let data = '';
 
-      res.on('data', (chunk: Buffer) => {
+      res.on('data', (chunk: any) => {
         data += chunk.toString();
       });
 
       res.on('end', () => {
         if (res.statusCode !== 200) {
-          debug('GLM API returned non-200 status:', res.statusCode);
+          debug('GLM quota API returned non-200 status:', res.statusCode);
           resolve(null);
           return;
         }
 
         try {
-          const parsed: GlmUsageApiResponse = JSON.parse(data);
-          resolve(parsed);
-        } catch (error) {
-          debug('Failed to parse GLM API response:', error);
+          const parsed: GlmQuotaApiResponse = JSON.parse(data);
+          resolve(parsed.data ?? null);
+        } catch (error: any) {
+          debug('Failed to parse GLM quota API response:', error);
           resolve(null);
         }
       });
     });
 
-    req.on('error', (error) => {
-      debug('GLM API request error:', error);
+    req.on('error', (error: any) => {
+      debug('GLM quota API request error:', error);
       resolve(null);
     });
 
     req.on('timeout', () => {
-      debug('GLM API request timeout');
+      debug('GLM quota API request timeout');
       req.destroy();
       resolve(null);
     });
