@@ -8,63 +8,58 @@
 
 ## 中文
 
-> Fork 自 [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
-
-基于原版 claude-hud-glm 插件，增加了 **GLM Coding Plan 配额用量** 的实时显示。
+> 基于 [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) 原版打补丁，添加 **GLM Coding Plan 配额用量** 实时显示。
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Fork](https://img.shields.io/badge/fork-Siiichenggg/claude--hud--glm-blue.svg)](https://github.com/Siiichenggg/claude-hud-glm)
+[![Base](https://img.shields.io/badge/based%20on-jarrodwatts%2Fclaude--hud-blue.svg)](https://github.com/jarrodwatts/claude-hud)
 
 ### 效果预览
 
-![Coding Plan 配额预览](coding-plan-preview.png)
+<img src="preview.png" alt="HUD 预览" width="600">
 
 状态栏会实时显示：
-- **5h: 17% (3h 55m)** — 5小时滚动窗口 token 用量及重置倒计时
-- **7d: 63%** — 每周 token 用量百分比
+- **Usage 3% (resets in 4h 34m)** — 5小时滚动窗口 token 用量及重置倒计时
+- **Weekly 65% (resets in 2d)** — 每周 token 用量百分比
 
 ### 与原版的区别
 
-| 特性 | 原版 | 本 Fork |
-|------|------|---------|
-| 用量数据来源 | Token 余额 API (`/api/biz/tokenAccounts/list/my`) | Coding Plan 配额 API (`/api/monitor/usage/quota/limit`) |
-| 显示内容 | Token 包余额百分比 | 5小时窗口 + 每周额度用量 |
-| 支持平台 | bigmodel.cn | bigmodel.cn + z.ai |
-| 重置倒计时 | Token 过期时间 | 5小时窗口自动倒计时 |
+仅修改了 2 个文件，其余全部使用原版 claude-hud 最新代码：
+
+| 文件 | 改动内容 |
+|------|----------|
+| `dist/usage-api.js` | 新增 GLM Coding Plan 配额 API 调用（`/api/monitor/usage/quota/limit`） |
+| `dist/index.js` | 新增回退逻辑：stdin 无 rate_limits 时调用 GLM 配额 API |
 
 ### 安装
 
-#### 方式一：直接替换已安装插件
+#### 前置条件
 
-如果你已经通过原版插件市场安装了 `claude-hud-glm`，可以直接替换编译后的文件：
+1. 已安装 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+2. 已配置 GLM Coding Plan 的 API key
 
-```bash
-# 替换缓存版本（实际运行的文件）
-cp dist/glm-usage-api.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/glm-usage-api.js
-cp dist/render/lines/usage.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/render/lines/usage.js
+#### 步骤
+
+**1. 安装原版 claude-hud**
+
+在 Claude Code 中执行：
+```
+/plugin marketplace add jarrodwatts/claude-hud
+/plugin install claude-hud
+/claude-hud:setup
 ```
 
-替换后重启 Claude Code 即可生效。
-
-#### 方式二：从本仓库安装
+**2. 打 GLM 补丁**
 
 ```bash
 git clone https://github.com/jinxiaocheng/claude-hud-glm.git
 cd claude-hud-glm
-npm install && npm run build
+chmod +x install.sh
+./install.sh
 ```
 
-然后在 Claude Code 中：
+**3. 配置 settings.json**
 
-```
-/plugin marketplace add /path/to/claude-hud-glm
-/plugin install claude-hud-glm
-/claude-hud-glm:setup
-```
-
-### 配置要求
-
-在 `~/.claude/settings.json` 中需要配置以下环境变量：
+确保 `~/.claude/settings.json` 中有以下配置：
 
 ```json
 {
@@ -79,7 +74,18 @@ npm install && npm run build
 - `https://api.z.ai/api/anthropic`
 - `https://open.bigmodel.cn/api/anthropic`
 
-### 工作原理
+重启 Claude Code 即可生效。
+
+### 更新
+
+当原版 claude-hud 更新后，补丁会被覆盖。重新运行安装脚本即可：
+
+```bash
+cd claude-hud-glm
+./install.sh
+```
+
+### 配额 API 说明
 
 调用 GLM Coding Plan 的配额查询接口：
 
@@ -91,22 +97,22 @@ GET /api/monitor/usage/quota/limit
 
 | unit | 含义 | 显示为 |
 |------|------|--------|
-| 3 | 5小时滚动窗口 token 用量 | `5h: XX%` |
-| 6 | 每周 token 用量 | `7d: XX%` |
+| 3 | 5小时滚动窗口 token 用量 | `Usage XX%` |
+| 6 | 每周 token 用量 | `Weekly XX%` |
 | 5 | MCP 工具月度用量 | （暂未显示） |
 
 每个配额项还包含 `nextResetTime` 时间戳，用于计算重置倒计时。
 
 ### 技术细节
 
-- **缓存机制**: 文件缓存，成功结果 60 秒过期，失败结果 15 秒过期
+- **补丁方式**: 仅替换 2 个编译后的 JS 文件，不修改 TypeScript 源码
+- **缓存机制**: 复用原版文件缓存（60s TTL 成功，15s TTL 失败）
 - **认证方式**: Authorization header 直接使用 API token（不加 Bearer 前缀）
-- **颜色编码**: 百分比会根据用量自动变色（低 → 绿，中 → 黄，高 → 红）
+- **颜色编码**: 复用原版进度条和颜色系统（绿 → 黄 → 红）
 
 ### 致谢
 
-- 原版插件: [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
-- 上游项目: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
+- 原版 HUD: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
 - 配额 API 参考: [zai-org/zai-coding-plugins](https://github.com/zai-org/zai-coding-plugins)
 
 ---
@@ -115,54 +121,58 @@ GET /api/monitor/usage/quota/limit
 
 ## English
 
-A Claude Code plugin that shows what's happening — context usage, active tools, running agents, todo progress, and **GLM Coding Plan quota tracking**. Always visible below your input.
-
-This is a fork of [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm) (which itself forks [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)) with support for **GLM Coding Plan** usage tracking.
+A patch for [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud) that adds **GLM Coding Plan quota tracking** to the HUD statusline.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Fork](https://img.shields.io/badge/fork-Siiichenggg/claude--hud--glm-blue.svg)](https://github.com/Siiichenggg/claude-hud-glm)
+[![Base](https://img.shields.io/badge/based%20on-jarrodwatts%2Fclaude--hud-blue.svg)](https://github.com/jarrodwatts/claude-hud)
 
-### What's Different
+### Preview
 
-| Feature | Upstream | This Fork |
-|---------|----------|-----------|
-| Data source | Token balance API (`/api/biz/tokenAccounts/list/my`) | Coding Plan quota API (`/api/monitor/usage/quota/limit`) |
-| Display | Token package balance % | 5-hour window + weekly quota usage |
-| Platforms | bigmodel.cn | bigmodel.cn + z.ai |
-| Reset countdown | Token expiry time | 5-hour window auto countdown |
+<img src="preview.png" alt="HUD Preview" width="600">
+
+The statusline shows:
+- **Usage 3% (resets in 4h 34m)** — 5-hour rolling token window with reset countdown
+- **Weekly 65% (resets in 2d)** — Weekly token quota percentage
+
+### What's Changed
+
+Only 2 files are modified, everything else is the original claude-hud:
+
+| File | Change |
+|------|--------|
+| `dist/usage-api.js` | Added GLM Coding Plan quota API call (`/api/monitor/usage/quota/limit`) |
+| `dist/index.js` | Added fallback: calls GLM quota API when stdin lacks `rate_limits` |
 
 ### Install
 
-**Option 1: Replace existing plugin files**
+#### Prerequisites
 
-If you already installed `claude-hud-glm` from the marketplace:
+1. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed
+2. GLM Coding Plan API key configured
 
-```bash
-cp dist/glm-usage-api.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/glm-usage-api.js
-cp dist/render/lines/usage.js ~/.claude/plugins/cache/claude-hud-glm/claude-hud-glm/*/dist/render/lines/usage.js
+#### Steps
+
+**1. Install original claude-hud**
+
+In Claude Code:
+```
+/plugin marketplace add jarrodwatts/claude-hud
+/plugin install claude-hud
+/claude-hud:setup
 ```
 
-Restart Claude Code after replacing.
-
-**Option 2: Install from this repo**
+**2. Apply GLM patch**
 
 ```bash
 git clone https://github.com/jinxiaocheng/claude-hud-glm.git
 cd claude-hud-glm
-npm install && npm run build
+chmod +x install.sh
+./install.sh
 ```
 
-Then in Claude Code:
+**3. Configure settings.json**
 
-```
-/plugin marketplace add /path/to/claude-hud-glm
-/plugin install claude-hud-glm
-/claude-hud-glm:setup
-```
-
-### Configuration
-
-Add to `~/.claude/settings.json`:
+Ensure `~/.claude/settings.json` contains:
 
 ```json
 {
@@ -177,9 +187,20 @@ Supported BASE_URL:
 - `https://api.z.ai/api/anthropic`
 - `https://open.bigmodel.cn/api/anthropic`
 
-### How It Works
+Restart Claude Code to apply.
 
-Calls the GLM Coding Plan quota API endpoint:
+### Updating
+
+When the original claude-hud updates, patches will be overwritten. Re-run:
+
+```bash
+cd claude-hud-glm
+./install.sh
+```
+
+### Quota API
+
+Calls the GLM Coding Plan quota endpoint:
 
 ```
 GET /api/monitor/usage/quota/limit
@@ -189,22 +210,22 @@ The `limits` array contains quota items distinguished by the `unit` field:
 
 | unit | Meaning | Display |
 |------|---------|---------|
-| 3 | 5-hour rolling token window | `5h: XX%` |
-| 6 | Weekly token quota | `7d: XX%` |
+| 3 | 5-hour rolling token window | `Usage XX%` |
+| 6 | Weekly token quota | `Weekly XX%` |
 | 5 | Monthly MCP tool quota | (not shown yet) |
 
 Each item includes a `nextResetTime` timestamp for countdown display.
 
 ### Technical Details
 
-- **Caching**: File-based, 60s TTL for success, 15s for failures
+- **Patching**: Only replaces 2 compiled JS files, no TypeScript source changes
+- **Caching**: Reuses original file cache (60s TTL success, 15s TTL failure)
 - **Auth**: Raw token in Authorization header (no Bearer prefix)
-- **Color coding**: Percentage auto-colors (green → yellow → red)
+- **Colors**: Reuses original progress bar and color system (green → yellow → red)
 
 ### Acknowledgments
 
-- Original plugin: [Siiichenggg/claude-hud-glm](https://github.com/Siiichenggg/claude-hud-glm)
-- Upstream project: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
+- Original HUD: [jarrodwatts/claude-hud](https://github.com/jarrodwatts/claude-hud)
 - Quota API reference: [zai-org/zai-coding-plugins](https://github.com/zai-org/zai-coding-plugins)
 
 ## License
